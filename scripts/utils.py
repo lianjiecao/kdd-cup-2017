@@ -3,7 +3,7 @@
 
 
 # import necessary modules
-import math, csv, time
+import math, csv, time, argparse
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -178,16 +178,33 @@ def dumpAverageVolume(vol_info, out_file):
 
 def main():
 
-    traj_in_file = '../dataSets/training/trajectories_table5_training.csv'
+    parser = argparse.ArgumentParser(description="Script to parse volume and traffic time data file")
+
+    parser.add_argument('--traj-file',
+        dest='traj_in',
+        action='store',
+        help='Trajectory data file',
+        type=str,
+        default='../dataSets/training/trajectories_table5_training.csv')
+
+    parser.add_argument('--vol-in',
+        dest='vol_in',
+        action='store',
+        help='Traffic volume data file',
+        type=str,
+        default='../dataSets/training/volume_table6_training.csv')
+
+    args = parser.parse_args()
+
+    traj_in_file = args.traj_in
     traj_out_file = '%s_20min_avg.csv' % traj_in_file.split('.csv')[0]
-    vol_in_file = '../dataSets/training/volume_table6_training.csv'
+    vol_in_file = args.vol_in
     vol_out_file = '%s_20min_avg.csv' % vol_in_file.split('.csv')[0]
 
     traj_info = parseTrajFile(traj_in_file)
     vol_info = parseVolumeFile(vol_in_file)
     dumpAverageTravelTime(traj_info, traj_out_file)
     dumpAverageVolume(vol_info, vol_out_file)
-    # avgTravelTime(in_file)
 
 if __name__ == '__main__':
     main()
