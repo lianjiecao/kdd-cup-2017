@@ -42,7 +42,7 @@ def calcTimeWindow(time_obj, win_size_min=20):
 
 
 
-def parseTrajFile(in_file):
+def parseTrajFile(in_file, time_fmt='%Y-%m-%d %H:%M:%S'):
     '''
     Parse trajectory data file
     Keys:
@@ -67,11 +67,9 @@ def parseTrajFile(in_file):
             ### Split travel seq as a list and convert time string to seconds ###
             travel_seq = [x.split('#') for x in rec['travel_seq'].split(';')]
             for t in travel_seq:
-                # t[1] = time.mktime(time.strptime(t[1], fmt_str))
-                t[1] = datetime.strptime(t[1], '%Y-%m-%d %H:%M:%S')
+                t[1] = datetime.strptime(t[1], time_fmt)
             rec.update({'travel_seq':travel_seq})
-            # rec.update({'starting_time':time.mktime(time.strptime(rec['starting_time'], fmt_str))})
-            rec.update({'starting_time':datetime.strptime(rec['starting_time'], '%Y-%m-%d %H:%M:%S')})
+            rec.update({'starting_time':datetime.strptime(rec['starting_time'], time_fmt)})
             ### Update related time window ###
             time_window_minute = int(math.floor(rec['starting_time'].minute / 20) * 20)
             start_time_window = datetime(rec['starting_time'].year, rec['starting_time'].month, rec['starting_time'].day,
@@ -87,7 +85,7 @@ def parseTrajFile(in_file):
     return veh_info
 
 
-def dumpAverageTravelTime(traj_info, out_file):
+def dumpAverageTravelTime(traj_info, out_file, d_type, n_dps):
     ''''
     Aggregate and dump travel time info
     '''
@@ -102,33 +100,63 @@ def dumpAverageTravelTime(traj_info, out_file):
         avg_travel_time.setdefault(traj['time_window'], {})
         avg_travel_time[traj['time_window']].setdefault(route, []).append(float(traj['travel_time']))
 
-    # for rt in avg_travel_time:
-    #     tws = avg_travel_time[rt].keys()
-    #     tws.sort()
-    #     for tw in tws:
-    #         print('%s-%s %s %.4f' % (rt[0], rt[1], str(tw), np.mean(avg_travel_time[rt][tw])))
-
     tws = avg_travel_time.keys()
     tws.sort()
     routes = list(routes)
     routes.sort()
+    output_keys = ['win_start','time_of_win','weekday'] + \
+        ['%s_%d' % ('-'.join(x),y) for y in range(n_dps) for x in routes]
+
+    if d_type == 'train':
+        ### Add missing time windows with 0 values for all routes ###
+        for i in range(1,len(tws)):
+            diff_win = (tws[i] - tws[i-1]).seconds / 1200
+            if diff_win > 1:
+                for j in range(diff_win-1):
+                    miss_win = tws[i-1] + timedelta(seconds=1200*(j+1))
+                    avg_travel_time[miss_win] = {}
+                    for rt in routes:
+                        avg_travel_time[miss_win][rt] = [0]
+                    print 'Added missing data point: %s %s' % (str(miss_win), avg_travel_time[miss_win])
+
+        ### Update time windws ###
+        tws = avg_travel_time.keys()
+        tws.sort()
+
+        ### For training data, add target values and creat data points with each 20min window ###
+        output_keys += ['y_%s_%d' % ('-'.join(x),y) for y in range(n_dps) for x in routes]
+        last_dp = 2*n_dps-1
+        dp_to_use = 1
+    elif d_type == 'test':
+        last_dp = n_dps-1
+        dp_to_use = n_dps
 
     with open(out_file, 'w') as csv_file:
-        csv_file.write('window_start,%s\n' % ','.join(['%s-%s' % (x[0], x[1]) for x in routes]))
-        for tw in tws:
-            line = str(tw)
-            for rt in routes:
-                if rt in avg_travel_time[tw]:
-                    line = '%s,%.4f' % (line, np.mean(avg_travel_time[tw][rt]))
-                else:
-                    line = '%s,0' % line
+        csv_file.write('%s\n' % ','.join(output_keys))
+        # for i, tw in enumerate(tws[:last_dp if last_dp != 0 else None]):
+        for i in range(0, len(tws)-last_dp, dp_to_use):
+            line = '%s,%s,%d' % (str(tws[i]), str(tws[i+n_dps-1]), tws[i].weekday())
+            for j in range(n_dps):
+                for rt in routes:
+                    if rt in avg_travel_time[tws[i+j]]:
+                        line = '%s,%.4f' % (line, np.mean(avg_travel_time[tws[i+j]][rt]))
+                    else:
+                        line = '%s,0' % line
+
+            if d_type == 'train':
+                for j in range(n_dps):
+                    for rt in routes:
+                        if rt in avg_travel_time[tws[n_dps+i+j]]:
+                            line = '%s,%.4f' % (line, np.mean(avg_travel_time[tws[n_dps+i+j]][rt]))
+                        else:
+                            line = '%s,0' % line
 
             csv_file.write(line+'\n')
 
     return
 
 
-def parseVolumeFile(in_file):
+def parseVolumeFile(in_file, time_fmt='%Y-%m-%d %H:%M:%S'):
     '''
     Parse data file and aggregate volume info
     Format:
@@ -137,11 +165,11 @@ def parseVolumeFile(in_file):
 
     '''
 
-    vol_info = readCSVToList(in_file, time_key='time', time_fmt='%Y-%m-%d %H:%M:%S')
+    vol_info = readCSVToList(in_file, 'time', time_fmt)
     return vol_info
 
 
-def dumpAverageVolume(vol_info, out_file):
+def dumpAverageVolume(vol_info, out_file, d_type, n_dps):
     ''''
     Aggregate and dump traffic volume info
     '''
@@ -160,16 +188,37 @@ def dumpAverageVolume(vol_info, out_file):
     tws.sort()
     tollgates = list(tollgates)
     tollgates.sort()
+    output_keys = ['win_start','time_of_win','weekday'] + \
+        ['%s_%d' % ('-'.join(x),y) for y in range(n_dps) for x in tollgates]
+
+    if d_type == 'train':
+        ### For training data, add target values and creat data points with each 20min window ###
+        output_keys += ['y_%s_%d' % ('-'.join(x),y) for y in range(n_dps) for x in tollgates]
+        last_dp = 2*n_dps-1
+        dp_to_use = 1
+    elif d_type == 'test':
+        last_dp = n_dps-1
+        dp_to_use = n_dps
 
     with open(out_file, 'w') as csv_file:
-        csv_file.write('window_start,%s\n' % ','.join(['%s-%s' % (x[0], x[1]) for x in tollgates]))
-        for tw in tws:
-            line = str(tw)
-            for toll in tollgates:
-                if toll in agg_vol[tw]:
-                    line = '%s,%d' % (line, len(agg_vol[tw][toll]))
-                else:
-                    line = '%s,0' % line
+        csv_file.write('%s\n' % ','.join(output_keys))
+        # for i, tw in enumerate(tws[:last_dp if last_dp != 0 else None]):
+        for i in range(0, len(tws)-last_dp, dp_to_use):
+            line = '%s,%s,%d' % (str(tws[i]), str(tws[i+n_dps-1]), tws[i].weekday())
+            for j in range(n_dps):
+                for toll in tollgates:
+                    if toll in agg_vol[tws[i+j]]:
+                        line = '%s,%d' % (line, len(agg_vol[tws[i+j]][toll]))
+                    else:
+                        line = '%s,0' % line
+
+            if d_type == 'train':
+                for j in range(n_dps):
+                    for toll in tollgates:
+                        if toll in agg_vol[tws[n_dps+i+j]]:
+                            line = '%s,%d' % (line, len(agg_vol[tws[n_dps+i+j]][toll]))
+                        else:
+                            line = '%s,0' % line
 
             csv_file.write(line+'\n')
 
@@ -187,24 +236,46 @@ def main():
         type=str,
         default='../dataSets/training/trajectories_table5_training.csv')
 
-    parser.add_argument('--vol-in',
+    parser.add_argument('--vol-file',
         dest='vol_in',
         action='store',
         help='Traffic volume data file',
         type=str,
         default='../dataSets/training/volume_table6_training.csv')
 
+    parser.add_argument('--data-type',
+        dest='d_type',
+        action='store',
+        help='Type of data: train or test',
+        type=str,
+        default='train')
+
+    parser.add_argument('--win-size',
+        dest='win_size',
+        action='store',
+        help='Number of data points in a training window',
+        type=int,
+        default=6)
+
+    # parser.add_argument('--dump-target',
+    #     dest='tar_val',
+    #     action='store',
+    #     help='Include target values in output files',
+    #     type=bool,
+    #     default=False)
+
     args = parser.parse_args()
 
     traj_in_file = args.traj_in
-    traj_out_file = '%s_20min_avg.csv' % traj_in_file.split('.csv')[0]
+    traj_out_file = '%s_20min_avg_%d_window.csv' % (traj_in_file.split('.csv')[0], args.win_size)
     vol_in_file = args.vol_in
-    vol_out_file = '%s_20min_avg.csv' % vol_in_file.split('.csv')[0]
+    vol_out_file = '%s_20min_avg_%d_window.csv' % (vol_in_file.split('.csv')[0], args.win_size)
 
     traj_info = parseTrajFile(traj_in_file)
     vol_info = parseVolumeFile(vol_in_file)
-    dumpAverageTravelTime(traj_info, traj_out_file)
-    dumpAverageVolume(vol_info, vol_out_file)
+    dumpAverageTravelTime(traj_info, traj_out_file, args.d_type, args.win_size)
+    dumpAverageVolume(vol_info, vol_out_file, args.d_type, args.win_size)
+    print 'Output files: \n%s\n%s\n' % (traj_out_file, vol_out_file)
 
 if __name__ == '__main__':
     main()
