@@ -2,7 +2,7 @@
 # data inputs consists a 2-hour window (divided to 20-min frames) of volumns and time information
 # data outputs is a 20-min frame of volumn immediately after the 2-hour window. ("Immediately" here means  0 - 1:40 hours after the training inputs)
 # the models are GP models with ARD RBF kernels
-
+# build a single model for all different gates, directions, or time frames
 
 #import sklearn as sk
 import GPy
@@ -96,7 +96,7 @@ m = GPy.models.GPRegression(norm_train_x, norm_train_y, kernel)
 # training
 print "training ..."
 m.optimize(messages=True, max_iters = max_iters)
-np.save('model_save.npy', m.param_array)
+np.save('saves/joint_model_save.npy', m.param_array)
 m.kern.plot_ARD()
 plt.show()
 print "done"
@@ -116,6 +116,7 @@ print "done"
 # output prediction
 
 with open(output_filename, "w" ) as f:
+  f.write('tollgate_id,time_window,direction,volume\n')
   for n in xrange(test_x.shape[0]):
     for m in xrange(train_y.shape[1]):
       h        = train_header[33+m]
